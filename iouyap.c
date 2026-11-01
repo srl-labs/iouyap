@@ -579,6 +579,21 @@ shutdown:
 }
 
 
+/* Disable one dead foreign port without taking down iou_listener's shared
+ * dispatch loop for the node's other, unrelated ports (Bug fix: a single
+ * port's fatal write errno, e.g. ENETDOWN when a peer's veth disappears,
+ * used to fall through to `goto shutdown` and kill the one thread that
+ * dispatches for every interface on this node). Mirrors the per-port
+ * removal foreign_listener() already does on its own read side. */
+static void
+iou_disable_port (unsigned int port)
+{
+  close (port_table[port].sfd);
+  port_table[port].sfd = NO_FD;
+  log_fmt ("Port %d disabled: foreign port write failed\n", port);
+}
+
+
 static void *
 iou_listener (void *arg)
 {
@@ -698,14 +713,16 @@ iou_listener (void *arg)
                   continue;
                 default:
                   log_error ("connect");
-                  goto shutdown;
+                  iou_disable_port (port);
+                  continue;
                 }
               break;
             default:
               break;
             }
           log_error ("Couldn't write to foreign port");
-          goto shutdown;
+          iou_disable_port (port);
+          continue;
         }
     }
 
